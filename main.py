@@ -18,7 +18,7 @@ N_MEDIUM = 300
 N_LARGE = 1000
 K_EXP = 0.5
 K_COEFFICIENT = 100
-B_EXP = 70
+B_EXP = 70 
 
 INPUT_SIZE_LIMIT = 1000000
 OUTPUT_SIZE_LIMIT = 10000
@@ -160,7 +160,6 @@ def random_distribution(num_teams, num_nodes):
     """
     Returns a random even distribution with num_teams teams
     """
-    # TODO: Make this efficient
     team_assignments = []
     i = 0
     j = 1
@@ -193,7 +192,7 @@ def improve_worst_team(input: nx.Graph):
         old_assignments.append(new.nodes[i]['team'])
     num_teams = max(set(old_assignments))
 
-    # determins the worst team in G
+    # determines the worst team in G
     worst_team = determine_worst_team(new, num_teams)
 
     # swaps each member of the worst team with a random node in G
@@ -208,7 +207,29 @@ def improve_worst_team(input: nx.Graph):
         new.nodes[i]['team'] = new_assignments[i]
     return new
 
+def random_graph(input: nx.Graph, num_teams):
+    """
+    Returns a copy of input with nodes randomly assigned into num_teams teams
+    """
+    new_graph = input.copy()
 
+    # assign random teams to the graph
+    assignment = random_distribution(num_teams, new_graph.number_of_nodes())
+    for i in range(new_graph.number_of_nodes()):
+        new_graph.nodes[i]['team'] = assignment[i]
+
+    return new_graph
+
+def update_leaderboard(leaderboard, new_item, max_length):
+    """
+    Updates the leaderboard with the new item (if it qualifies)
+    """
+    if len(leaderboard) < max_length or leaderboard[-1]['score'] > new_item['score']:
+        leaderboard.append(new_item)
+        leaderboard.sort(key=lambda x:x['score'], reverse=False)
+        if len(leaderboard) > max_length:
+            leaderboard = leaderboard[:-1]
+    return leaderboard
 
 def solve(input: nx.Graph) -> nx.Graph:
     """
@@ -218,33 +239,63 @@ def solve(input: nx.Graph) -> nx.Graph:
     # Access the team of v with team_id = G.nodes[v]['team']
     
     # iterate over team #
-    N = 3 # number of initial samples per team_size
+    NUM_ORIGINAL_SAMPLES = 3 # number of initial samples per team_size
     CUTOFF = 1000 # when to stop increasing num_teams
+    NUM_GRAPHS_TO_RESAMPLE = 10
+    NUM_RESAMPLES = 10
+    NUM_GRAPHS_TO_IMPROVE = 10
+    NUM_IMPROVEMENTS = 5
 
     current_best_score = math.inf
-    current_best = None
-    best_team_size = 1
+    
+    graphs_to_resample = []
+    
     for num_teams in range(1, input.number_of_edges()//2):
 
+        samples = []
         # take n different samples at each team size
-        for i in range(N):
+        for i in range(NUM_ORIGINAL_SAMPLES):
 
-            candidate = input.copy()
-            samples = []
+            candidate = random_graph(input, num_teams)
 
-            # assign random teams to the graph
-            assignment = random_distribution(num_teams, candidate.number_of_nodes())
-            for i in range(candidate.number_of_nodes()):
-                candidate.nodes[i]['team'] = assignment[i]
-                
             current_score = score(candidate)
             if current_score < current_best_score:
                 current_best_score = current_score
-                current_best = candidate.copy()
-                best_num_teams = num_teams
+
+            new_item = {'graph': candidate.copy(), 'num_teams': num_teams, 'score':current_score}
+            graphs_to_resample = update_leaderboard(graphs_to_resample, new_item, NUM_GRAPHS_TO_RESAMPLE)
             samples.append(current_score)
-        if round(min(samples)) > current_best_score * CUTOFF: # dont make this too tight
+
+        # Finishes incrementing num_teams if performance gets bad enough
+        if round(min(samples)) > current_best_score * CUTOFF:
             break
+    
+    graphs_to_improve = []
+    for item in graphs_to_resample:
+
+        # Appends the original item to the list if it is good enough
+        graphs_to_improve = update_leaderboard(graphs_to_improve, item, NUM_GRAPHS_TO_IMPROVE)
+
+        for i in range(NUM_RESAMPLES):
+            candidate = random_graph(input, item['num_teams'])
+            new_item = {'graph': candidate.copy(), 'num_teams': item['num_teams'], 'score':score(candidate)}
+            graphs_to_improve = update_leaderboard(graphs_to_improve, new_item, NUM_GRAPHS_TO_IMPROVE)
+
+    current_best = None
+    current_best_score = math.inf
+
+    for item in graphs_to_improve:
+        candidate_best_score = item['score']
+        candidate = item['graph'].copy()
+        for i in range(NUM_IMPROVEMENTS):
+            improved_graph = improve_worst_team(candidate)
+            improved_graph_score = score(improved_graph)
+            if improved_graph_score < candidate_best_score:
+                candidate = improved_graph.copy()
+                candidate_best_score = improved_graph_score
+        if candidate_best_score < current_best_score:
+            current_best = candidate.copy()
+
     return current_best
 
 
@@ -252,4 +303,6 @@ input = read_input('./inputs/large.in')
 final = solve(input)
 validate_output(final)
 print('Final score:', score(final))
-run_all(solve, './inputs', './outputs01', overwrite=True)
+
+# Use once algorithm is complete
+# run_all(solve, './inputs', './outputs01', overwrite=True)
